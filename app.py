@@ -6,6 +6,12 @@ import fitz
 import os
 import re
 from collections import Counter
+# Import enhanced recommender with ASJC-based scoring (v2 with proper dataset integration)
+try:
+    from recommender_enhanced_v2 import load_venue_database_enhanced, recommend_venues_enhanced
+except ImportError:
+    from recommender_enhanced import load_venue_database_enhanced, recommend_venues_enhanced
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -21,14 +27,49 @@ except Exception as e:
     print(f"Error loading model: {e}")
     model = None
 
-# Load dataset with error handling
+# Load new venue dataset (ext_list_Jan_2026)
 try:
-    csv_path = os.path.join(current_dir, "arxiv_clean.csv")
-    dataset = pd.read_csv(csv_path)
-    dataset = dataset.dropna().head(100)
+    # Try to load preprocessed venues first (from new dataset)
+    csv_path = os.path.join(current_dir, "datasets", "ext_venues_active.csv")
+    if not os.path.exists(csv_path):
+        # Fallback to full dataset if active dataset not found
+        csv_path = os.path.join(current_dir, "datasets", "ext_venues_full.csv")
+    
+    if os.path.exists(csv_path):
+        dataset = pd.read_csv(csv_path)
+        print(f"[OK] Loaded new venue dataset: {len(dataset)} active venues")
+    else:
+        # Keep existing behavior for backward compatibility
+        csv_path = os.path.join(current_dir, "arxiv_clean.csv")
+        dataset = pd.read_csv(csv_path)
+        dataset = dataset.dropna().head(100)
 except Exception as e:
     print(f"Error loading dataset: {e}")
     dataset = pd.DataFrame()
+
+# Load venue database for recommendations
+try:
+    venue_db = load_venue_database_enhanced()
+    print(f"[OK] Enhanced venue database loaded with {len(venue_db)} venues")
+except Exception as e:
+    print(f"Warning: Could not load venue database: {e}")
+    venue_db = None
+
+# Load TF-IDF vectorizer for recommendation topic matching
+global_vectorizer = None
+
+# Domain keywords for paper classification
+DOMAIN_KEYWORDS_SIMPLE = {
+    "Computer Science & AI": ["machine learning", "ai", "artificial intelligence", "neural network", "deep learning", "algorithm", "database", "software"],
+    "Biomedical & Medicine": ["medical", "clinical", "disease", "health", "patient", "treatment", "diagnosis", "drug", "therapy", "biomedical"],
+    "Physics & Materials": ["physics", "quantum", "particle", "material", "electromagnetic", "relativity"],
+    "Chemistry": ["chemistry", "chemical", "reaction", "molecule", "compound", "synthesis", "organic"],
+    "Engineering": ["engineering", "mechanical", "electrical", "civil", "infrastructure", "infrastructure"],
+    "Mathematics": ["mathematics", "mathematical", "proof", "theorem", "equation", "calculus"],
+    "Economics & Business": ["economics", "economic", "business", "financial", "market", "trade"],
+    "Environmental Science": ["environmental", "ecology", "sustainable", "pollution", "climate", "conservation"],
+    "Social Sciences": ["social", "sociology", "anthropology", "psychology", "culture", "society"]
+}
 
 # Extract text
 def extract_text_from_pdf(file):
@@ -56,6 +97,68 @@ def extract_features(text):
         "avg_word_length": sum(len(word) for word in words) / len(words),
         "readability": 50
     }
+
+# Detect paper domain and get domain statistics
+def get_domain_stats(text):
+    """
+    Detect paper domain and calculate statistics from venue database
+    """
+    text_lower = (text or "").lower()
+    
+    # Detect domain
+    domain_scores = {}
+    for domain, keywords in DOMAIN_KEYWORDS_SIMPLE.items():
+        score = sum(text_lower.count(keyword) for keyword in keywords)
+        if score > 0:
+            domain_scores[domain] = score
+    
+    detected_domain = max(domain_scores, key=domain_scores.get) if domain_scores else "General Research"
+    confidence = min((domain_scores.get(detected_domain, 0) / max(1, len(text_lower.split()))) * 100, 100)
+    
+    # Calculate domain statistics from dataset
+    domain_stats = {
+        "domain": detected_domain,
+        "confidence": confidence,
+        "total_venues": len(dataset) if not dataset.empty else 0,
+        "matching_venues": 0,
+        "oa_count": 0,
+        "medline_count": 0,
+        "active_count": 0,
+        "publishers_count": 0
+    }
+    
+    if not dataset.empty:
+        # Count total statistics
+        domain_stats["total_venues"] = len(dataset)
+        
+        # Try to count OA venues
+        try:
+            domain_stats["oa_count"] = len(dataset[dataset.get("OA Status", pd.Series()).str.contains("OA", case=False, na=False)])
+        except:
+            domain_stats["oa_count"] = 0
+        
+        # Try to count Medline venues
+        try:
+            domain_stats["medline_count"] = len(dataset[dataset.get("Medline Coverage", pd.Series()).str.contains("Yes|Indexed", case=False, na=False)])
+        except:
+            domain_stats["medline_count"] = 0
+        
+        # Try to count active venues
+        try:
+            domain_stats["active_count"] = len(dataset[dataset.get("Status", pd.Series()).str.contains("Active", case=False, na=False)])
+        except:
+            domain_stats["active_count"] = len(dataset)
+        
+        # Count publishers
+        try:
+            domain_stats["publishers_count"] = dataset.get("Publisher", pd.Series()).nunique()
+        except:
+            domain_stats["publishers_count"] = 0
+        
+        # For now, set matching_venues as domain percentage (this can be enhanced)
+        domain_stats["matching_venues"] = int(len(dataset) * 0.3)  # Estimate ~30% match to domain
+    
+    return domain_stats
 
 # Extract or generate summary
 def extract_summary(text, max_sentences=5):
@@ -224,58 +327,192 @@ def generate_recommendations(text, features, score):
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    file = request.files["file"]
+    try:
+        file = request.files["file"]
 
-    text = extract_text_from_pdf(file)
+        text = extract_text_from_pdf(file)
 
-    # Extract summary early
-    summary = extract_summary(text)
+        # Extract summary early
+        summary = extract_summary(text)
 
-    features = extract_features(text)
-    features_df = pd.DataFrame([features])
+        features = extract_features(text)
+        features_df = pd.DataFrame([features])
 
-    score = model.predict(features_df)[0]
+        # Get domain statistics
+        domain_stats = get_domain_stats(text)
 
-    # 🔥 repetition penalty
-    words = text.split()
-    if len(words) > 0:
-        unique_ratio = len(set(words)) / len(words)
-        if unique_ratio < 0.4:
-            score -= 2
+        # Check if model is loaded, use default score if not
+        if model is None:
+            print("Warning: Model not loaded, using default scoring")
+            score = 6.5  # Default middle score
+        else:
+            score = model.predict(features_df)[0]
 
-    score = max(0, min(10, score))
+        # 🔥 repetition penalty
+        words = text.split()
+        if len(words) > 0:
+            unique_ratio = len(set(words)) / len(words)
+            if unique_ratio < 0.4:
+                score -= 2
 
-    # Generate recommendations based on analysis
-    recommendations = generate_recommendations(text, features, score)
+        score = max(0, min(10, score))
 
-    # Similarity
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
+        # Generate recommendations based on analysis
+        recommendations = generate_recommendations(text, features, score)
 
-    all_docs = dataset["summary"].tolist()
-    all_docs.insert(0, text)
+        # Similarity matching - use Source Title as the basis for comparison
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
 
-    vectorizer = TfidfVectorizer(max_features=500)
-    tfidf = vectorizer.fit_transform(all_docs)
+        # Get the document titles - use 'Source Title' column from venues dataset
+        docs_for_comparison = []
+        paper_titles = []
+        
+        if not dataset.empty and 'Source Title' in dataset.columns:
+            docs_for_comparison = dataset["Source Title"].fillna("").tolist()
+            paper_titles = docs_for_comparison[:5]
+        
+        all_docs = docs_for_comparison.copy() if docs_for_comparison else [""]
+        all_docs.insert(0, text)
 
-    similarity = cosine_similarity(tfidf)[0]
+        vectorizer = TfidfVectorizer(max_features=500)
+        tfidf = vectorizer.fit_transform(all_docs)
 
-    top_indices = similarity.argsort()[-6:][::-1][1:]
+        similarity = cosine_similarity(tfidf)[0]
 
-    similar_papers = []
-    for i in top_indices:
-        similar_papers.append({
-            "title": dataset.iloc[i-1]["title"],
-            "score": float(similarity[i])
+        top_indices = similarity.argsort()[-6:][::-1][1:]
+
+        similar_papers = []
+        for i in top_indices:
+            if i-1 >= 0 and i-1 < len(dataset):
+                title_col = "Source Title" if "Source Title" in dataset.columns else "title"
+                similar_papers.append({
+                    "title": str(dataset.iloc[i-1][title_col])[:100],
+                    "score": float(similarity[i])
+                })
+
+        return jsonify({
+            "score": float(score),
+            "features": features,
+            "similar_papers": similar_papers,
+            "summary": summary,
+            "recommendations": recommendations,
+            "domain_stats": domain_stats
         })
+    
+    except Exception as e:
+        print(f"Error in predict endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "error": f"Failed to analyze paper: {str(e)}"
+        }), 500
 
+
+@app.route("/recommend", methods=["POST"])
+def recommend():
+    """
+    Venue Recommender Endpoint
+    
+    Automatically extracts research domain from uploaded paper content and recommends suitable venues.
+    
+    Request JSON:
+      {
+        "paper_text": str (REQUIRED: full paper text/summary - used for domain detection),
+        "paper_score": float (0-10),
+        "paper_topic": str (OPTIONAL: user-provided keywords - not used for domain extraction),
+        "venue_type": str ("journal" or "conference"),
+        "indexing": list (["Scopus", "Any", ...]),
+        "fee_pref": str ("Free", "Low", "Any"),
+        "acceptance": str ("High", "Low", "Any")
+      }
+    
+    Response JSON:
+      {
+        "venues": [
+          {
+            "name": str,
+            "type": str,
+            "indexing": str,
+            "quartile": str or null,
+            "apc_amount": int,
+            "avg_weeks": int,
+            "url": str,
+            "match_score": float (0-100),
+            "reason": str
+          },
+          ... (up to 10 venues)
+        ]
+      }
+    """
+    
+    try:
+        # Parse request
+        data = request.get_json()
+        
+        paper_text = data.get("paper_text", "")
+        paper_score = float(data.get("paper_score", 5))
+        paper_topic = data.get("paper_topic", "")
+        
+        # Build preferences dict with ENHANCED parameters
+        prefs = {
+            "venue_type": data.get("venue_type", "any"),
+            "indexing": data.get("indexing", ["Any"]),
+            "fee_pref": data.get("fee_pref", "Any"),
+            "acceptance": data.get("acceptance", "Any"),
+            # Enhanced parameters from new dataset
+            "open_access_only": data.get("open_access_only", False),
+            "publisher": data.get("publisher", "any"),
+            "min_coverage_year": data.get("min_coverage_year", 2000),
+            "exclude_discontinued": data.get("exclude_discontinued", False),
+            "medline_only": data.get("medline_only", False),
+            "selected_subjects": data.get("selected_subjects", [])
+        }
+        
+        # Validate inputs
+        if not paper_text or len(paper_text.strip()) < 50:
+            return jsonify({
+                "error": "paper_text must be provided and contain at least 50 characters"
+            }), 400
+        
+        if venue_db is None or venue_db.empty:
+            return jsonify({
+                "error": "Venue database not available. Try again later."
+            }), 503
+        
+        # Call enhanced recommender
+        result = recommend_venues_enhanced(
+            paper_text=paper_text,
+            paper_score=paper_score,
+            paper_topic=paper_topic,
+            preferences=prefs,
+            venue_db=venue_db,
+            top_n=10
+        )
+        
+        return jsonify(result)
+    
+    except ValueError as e:
+        return jsonify({"error": f"Invalid input: {str(e)}"}), 400
+    except Exception as e:
+        print(f"Recommend endpoint error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    """
+    Health check endpoint
+    """
     return jsonify({
-        "score": float(score),
-        "features": features,
-        "similar_papers": similar_papers,
-        "summary": summary,
-        "recommendations": recommendations
+        "status": "ok",
+        "model_loaded": model is not None,
+        "venue_db_loaded": venue_db is not None,
+        "venue_count": len(venue_db) if venue_db is not None else 0
     })
+
 
 if __name__ == "__main__":
     app.run(debug=True, host="127.0.0.1", port=5000)

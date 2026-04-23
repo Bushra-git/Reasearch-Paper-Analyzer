@@ -3,6 +3,7 @@ const axios = require("axios");
 const cors = require("cors");
 const multer = require("multer");
 const FormData = require("form-data");
+const recommendRoute = require("./routes/recommend");
 
 const app = express();
 const upload = multer();
@@ -36,6 +37,8 @@ app.post("/analyze", upload.single("file"), async (req, res) => {
     res.status(500).json({ error: error.message || "Error processing file" });
   }
 });
+
+app.post("/api/recommend", recommendRoute);
 
 app.listen(3001, () => {
   console.log("Server running on http://localhost:3001");

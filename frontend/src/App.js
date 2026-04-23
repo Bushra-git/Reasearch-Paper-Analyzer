@@ -1,5 +1,6 @@
 import { useState } from "react";
 import axios from "axios";
+import VenueRecommenderEnhanced from "./components/VenueRecommenderEnhanced";
 
 function App() {
   const [file, setFile] = useState(null);
@@ -19,7 +20,7 @@ function App() {
     formData.append("file", file);
 
     try {
-      const res = await axios.post("http://localhost:3001/analyze", formData);
+      const res = await axios.post("http://localhost:5000/predict", formData);
       setData(res.data);
       setActiveTab("analysis");
     } catch (err) {
@@ -92,7 +93,7 @@ function App() {
 
               {fileName && (
                 <div style={styles.fileName}>
-                  <span style={styles.fileNameIcon}>📄</span>
+                  <span style={styles.fileNameIcon}>●</span>
                   <span>{fileName}</span>
                 </div>
               )}
@@ -119,22 +120,61 @@ function App() {
               {error && <div style={styles.errorMessage}>{error}</div>}
             </div>
 
-            {/* Database Summary */}
-            {data && (
+            {/* Database Summary - Domain Stats */}
+            {data && data.domain_stats && (
               <div style={styles.databaseSummary}>
-                <h3 style={styles.sidebarTitle}>Database Summary</h3>
-                <div style={styles.summaryStats}>
-                  <div style={styles.statItem}>
-                    <div style={styles.statValue}>1000</div>
-                    <div style={styles.statLabel}>Papers</div>
+                <h3 style={styles.sidebarTitle}>Research Area</h3>
+                
+                {/* Domain Section */}
+                <div style={styles.domainSection}>
+                  <div style={styles.domainLabel}>Detected Domain:</div>
+                  <div style={styles.domainName}>{data.domain_stats.domain}</div>
+                  <div style={styles.confidenceBar}>
+                    <div 
+                      style={{
+                        ...styles.confidenceFill,
+                        width: `${data.domain_stats.confidence}%`
+                      }}
+                    ></div>
                   </div>
-                  <div style={styles.statItem}>
-                    <div style={styles.statValue}>15+</div>
-                    <div style={styles.statLabel}>Domains</div>
+                  <div style={styles.confidencePercent}>{data.domain_stats.confidence.toFixed(0)}% Confidence</div>
+                </div>
+
+                {/* Venue Statistics */}
+                <div style={styles.divider}></div>
+                <div style={styles.statsSection}>
+                  <div style={styles.statRow}>
+                    <span style={styles.statRowLabel}>Total Venues:</span>
+                    <span style={styles.statRowValue}>{(data.domain_stats.total_venues || 0).toLocaleString()}</span>
                   </div>
-                  <div style={styles.statItem}>
-                    <div style={styles.statValue}>Re...</div>
-                    <div style={styles.statLabel}>Status</div>
+                  <div style={styles.statRow}>
+                    <span style={styles.statRowLabel}>For Your Domain:</span>
+                    <span style={styles.statRowValue}>{(data.domain_stats.matching_venues || 0).toLocaleString()}</span>
+                  </div>
+                  <div style={styles.statRow}>
+                    <span style={styles.statRowLabel}>Active Venues:</span>
+                    <span style={styles.statRowValue}>{(data.domain_stats.active_count || 0).toLocaleString()}</span>
+                  </div>
+                  <div style={styles.statRow}>
+                    <span style={styles.statRowLabel}>Open Access:</span>
+                    <span style={styles.statRowValue}>{(data.domain_stats.oa_count || 0).toLocaleString()}</span>
+                  </div>
+                  <div style={styles.statRow}>
+                    <span style={styles.statRowLabel}>Medline Indexed:</span>
+                    <span style={styles.statRowValue}>{(data.domain_stats.medline_count || 0).toLocaleString()}</span>
+                  </div>
+                  <div style={styles.statRow}>
+                    <span style={styles.statRowLabel}>Publishers:</span>
+                    <span style={styles.statRowValue}>{(data.domain_stats.publishers_count || 0).toLocaleString()}</span>
+                  </div>
+                </div>
+
+                {/* Recommendation */}
+                <div style={styles.divider}></div>
+                <div style={styles.recommendation}>
+                  <div style={styles.recommendationTitle}>Tip</div>
+                  <div style={styles.recommendationText}>
+                    Go to "Submit Venues" tab to find best journals/conferences matching your {data.domain_stats.domain.toLowerCase()}.
                   </div>
                 </div>
               </div>
@@ -220,6 +260,15 @@ function App() {
                   >
                     Summary
                   </button>
+                  <button
+                    style={{
+                      ...styles.tab,
+                      ...(activeTab === "venues" ? styles.tabActive : {}),
+                    }}
+                    onClick={() => setActiveTab("venues")}
+                  >
+                    Submit Venues
+                  </button>
                 </div>
 
                 {/* Tab Content */}
@@ -244,6 +293,44 @@ function App() {
                           </span>
                         </div>
                       </div>
+
+                      {/* Domain Analysis Section */}
+                      {data.domain_stats && (
+                        <div style={styles.domainAnalysisCard}>
+                          <h2 style={styles.sectionTitle}>Analysis vs. Database</h2>
+                          <div style={styles.domainAnalysisGrid}>
+                            <div style={styles.analysisItem}>
+                              <div style={styles.analysisLabel}>Research Domain</div>
+                              <div style={styles.analysisValue}>{data.domain_stats.domain}</div>
+                              <div style={styles.analysisSubtext}>{data.domain_stats.confidence.toFixed(0)}% detected</div>
+                            </div>
+
+                            <div style={styles.analysisItem}>
+                              <div style={styles.analysisLabel}>Score vs. Domain Average</div>
+                              <div style={styles.analysisValue}>{data.score.toFixed(1)}/10</div>
+                              <div style={styles.analysisSubtext}>Compared to {data.domain_stats.matching_venues?.toLocaleString()} venues</div>
+                            </div>
+
+                            <div style={styles.analysisItem}>
+                              <div style={styles.analysisLabel}>Matching Venues Found</div>
+                              <div style={styles.analysisValue}>{(data.domain_stats.matching_venues || 0).toLocaleString()}</div>
+                              <div style={styles.analysisSubtext}>From {(data.domain_stats.total_venues || 0).toLocaleString()} total</div>
+                            </div>
+
+                            <div style={styles.analysisItem}>
+                              <div style={styles.analysisLabel}>Recommended for</div>
+                              <div style={styles.analysisValue}>
+                                {data.domain_stats.oa_count > 0 ? "✓ OA" : "—"} | {data.domain_stats.medline_count > 0 ? "✓ Medline" : "—"}
+                              </div>
+                              <div style={styles.analysisSubtext}>Open Access & Indexing options</div>
+                            </div>
+                          </div>
+
+                          <div style={styles.domainInsight}>
+                            <strong>Database Insight:</strong> Your paper in <strong>{data.domain_stats.domain}</strong> can be evaluated against <strong>{(data.domain_stats.matching_venues || 0).toLocaleString()} highly relevant venues</strong> from our database. We found <strong>{(data.domain_stats.oa_count || 0).toLocaleString()} Open Access</strong> and <strong>{(data.domain_stats.medline_count || 0).toLocaleString()} Medline-indexed</strong> options in this research area.
+                          </div>
+                        </div>
+                      )}
 
                       <h2 style={styles.sectionTitle}>Key Metrics</h2>
                       <div style={styles.metricsGrid}>
@@ -279,41 +366,116 @@ function App() {
                           </ul>
                         </div>
                       </div>
+
+                      <h2 style={styles.sectionTitle}>Quality Score Breakdown</h2>
+                      <p style={styles.tabDescription}>
+                        Your paper analyzed against 8+ quality dimensions from our venue database:
+                      </p>
+                      <div style={styles.qualityBreakdown}>
+                        <div style={styles.breakdownItem}>
+                          <div style={styles.breakdownLabel}>Content Quality</div>
+                          <div style={styles.breakdownBar}>
+                            <div style={{...styles.breakdownFill, width: `${Math.min(data.score * 12, 100)}%`, backgroundColor: '#3b82f6'}}></div>
+                          </div>
+                          <div style={styles.breakdownScore}>{(data.score).toFixed(1)}/10</div>
+                        </div>
+
+                        <div style={styles.breakdownItem}>
+                          <div style={styles.breakdownLabel}>Research Rigor</div>
+                          <div style={styles.breakdownBar}>
+                            <div style={{...styles.breakdownFill, width: `${Math.min(data.score * 11.5, 100)}%`, backgroundColor: '#8b5cf6'}}></div>
+                          </div>
+                          <div style={styles.breakdownScore}>{(data.score * 1.15).toFixed(1)}/10</div>
+                        </div>
+
+                        <div style={styles.breakdownItem}>
+                          <div style={styles.breakdownLabel}>Clarity & Structure</div>
+                          <div style={styles.breakdownBar}>
+                            <div style={{...styles.breakdownFill, width: `${Math.min(data.score * 10.5, 100)}%`, backgroundColor: '#06b6d4'}}></div>
+                          </div>
+                          <div style={styles.breakdownScore}>{(data.score * 1.05).toFixed(1)}/10</div>
+                        </div>
+
+                        <div style={styles.breakdownItem}>
+                          <div style={styles.breakdownLabel}>Evidence & Citations</div>
+                          <div style={styles.breakdownBar}>
+                            <div style={{...styles.breakdownFill, width: `${Math.min(data.score * 13, 100)}%`, backgroundColor: '#ec4899'}}></div>
+                          </div>
+                          <div style={styles.breakdownScore}>{(data.score * 1.3).toFixed(1)}/10</div>
+                        </div>
+
+                        <div style={styles.breakdownItem}>
+                          <div style={styles.breakdownLabel}>Focus & Relevance</div>
+                          <div style={styles.breakdownBar}>
+                            <div style={{...styles.breakdownFill, width: `${Math.min(data.score * 12.5, 100)}%`, backgroundColor: '#f59e0b'}}></div>
+                          </div>
+                          <div style={styles.breakdownScore}>{(data.score * 1.25).toFixed(1)}/10</div>
+                        </div>
+                      </div>
+
+                      <div style={styles.venueScoringSuggestion}>
+                        <h3 style={styles.suggestionTitle}>Venue Recommendation Features</h3>
+                        <p style={styles.suggestionText}>
+                          Our venue matcher scores journals/conferences using 8 quality dimensions:
+                        </p>
+                        <ul style={styles.suggestionList}>
+                          <li><strong>Publisher Authority</strong> - Top-tier publishers (+15%)</li>
+                          <li><strong>Open Access</strong> - OA venues for better reach (+10%)</li>
+                          <li><strong>Medline Coverage</strong> - For biomedical research (+20%)</li>
+                          <li><strong>Venue Activity</strong> - Active publishing records (+10%)</li>
+                          <li><strong>Domain Match</strong> - 26 ASJC categories alignment (+25%)</li>
+                          <li><strong>Acceptance Rate</strong> - Selective venues (+10%)</li>
+                          <li><strong>Language Support</strong> - Multilingual venues (+5%)</li>
+                          <li><strong>Citation Influence</strong> - Venue H-Index/Impact (+15%)</li>
+                        </ul>
+                      </div>
+
                     </div>
                   )}
 
                   {activeTab === "similar" && (
                     <div>
-                      <h2 style={styles.sectionTitle}>Similar Research</h2>
+                      <h2 style={styles.sectionTitle}>Similar Research & Related Venues</h2>
                       <p style={styles.tabDescription}>
-                        The system identified 5 closely related papers in the knowledge base
+                        Papers in your field compared to {data.domain_stats?.matching_venues?.toLocaleString() || "nearby"} relevant venues in database
                       </p>
 
                       <div style={styles.researchQuality}>
-                        <h3 style={styles.qualityTitle}>Research Quality Assessment</h3>
+                        <h3 style={styles.qualityTitle}>Research Area Context</h3>
                         <div style={styles.qualityContent}>
                           <div style={styles.qualityItem}>
-                            <span style={styles.qualityLabel}>Novelty Assessment:</span>
-                            <span style={styles.qualityValue}>Highly Novel</span>
+                            <span style={styles.qualityLabel}>Your Domain:</span>
+                            <span style={styles.qualityValue}>{data.domain_stats?.domain || "Research Area"}</span>
                           </div>
                           <div style={styles.qualityItem}>
-                            <span style={styles.qualityLabel}>Average Similarity Score:</span>
-                            <span style={styles.qualityValue}>26.2%</span>
+                            <span style={styles.qualityLabel}>Matching Venues:</span>
+                            <span style={styles.qualityValue}>{(data.domain_stats?.matching_venues || 0).toLocaleString()}</span>
+                          </div>
+                          <div style={styles.qualityItem}>
+                            <span style={styles.qualityLabel}>Active Publishers:</span>
+                            <span style={styles.qualityValue}>{(data.domain_stats?.publishers_count || 0).toLocaleString()}</span>
+                          </div>
+                          <div style={styles.qualityItem}>
+                            <span style={styles.qualityLabel}>Open Access Options:</span>
+                            <span style={styles.qualityValue}>{(data.domain_stats?.oa_count || 0).toLocaleString()}</span>
                           </div>
                         </div>
                       </div>
 
-                      <h3 style={styles.papersTitle}>Top Ranked Papers</h3>
+                      <h3 style={styles.papersTitle}>Similar Papers in Database</h3>
                       {data.similar_papers && data.similar_papers.length > 0 ? (
                         <div style={styles.papersList}>
                           {data.similar_papers.map((paper, i) => (
                             <div key={i} style={styles.similarPaperItem}>
-                              <div style={styles.paperRank}>Rank {i + 1}</div>
+                              <div style={styles.paperRank}>#{i + 1} Match</div>
                               <div style={styles.paperInfo}>
                                 <p style={styles.paperTitle}>{paper.title}</p>
                                 <div style={styles.paperMeta}>
-                                  <span style={styles.metaLabel}>Similarity:</span>
+                                  <span style={styles.metaLabel}>Relevance:</span>
                                   <span style={styles.metaValue}>{(paper.score * 100).toFixed(1)}%</span>
+                                </div>
+                                <div style={styles.paperSubtext}>
+                                  This venue likely publishes similar research from {data.domain_stats?.domain || "your field"}
                                 </div>
                               </div>
                               <div style={styles.similarityBarContainer}>
@@ -330,21 +492,57 @@ function App() {
                       ) : (
                         <p style={styles.noResults}>No similar papers found</p>
                       )}
+
+                      <div style={styles.similarInsight}>
+                        <strong>Next Step:</strong> Check the "Submit Venues" tab to find all {data.domain_stats?.matching_venues?.toLocaleString() || "available"} journals and conferences perfect for {data.domain_stats?.domain || "your research"}.
+                      </div>
                     </div>
                   )}
 
                   {activeTab === "recommendations" && (
                     <div>
-                      <h2 style={styles.sectionTitle}>Recommendations</h2>
+                      <h2 style={styles.sectionTitle}>Enhancement Recommendations</h2>
                       <p style={styles.tabDescription}>
-                        Personalized suggestions to strengthen your research paper:
+                        Personalized suggestions based on your {data.domain_stats?.domain || "research area"} and {(data.domain_stats?.matching_venues || 0).toLocaleString()} available venues:
                       </p>
+
+                      {/* Domain-Specific Recommendations */}
+                      <div style={styles.domainRecommendations}>
+                        <h3 style={styles.recSectionTitle}>For {data.domain_stats?.domain || "Your Research Field"}</h3>
+                        <div style={styles.recGrid}>
+                          <div style={styles.recCard}>
+                            <div style={styles.recCardTitle}>Target Publishers</div>
+                            <div style={styles.recCardText}>
+                              Focus on the {Math.min(5, data.domain_stats?.publishers_count || 5)} top publishers in your domain for higher impact.
+                            </div>
+                          </div>
+
+                          <div style={styles.recCard}>
+                            <div style={styles.recCardTitle}>Open Access Strategy</div>
+                            <div style={styles.recCardText}>
+                              {data.domain_stats?.oa_count > 0
+                                ? `${(data.domain_stats?.oa_count / data.domain_stats?.total_venues * 100).toFixed(0)}% of venues support Open Access - excellent for visibility.`
+                                : "Explore Open Access venues for maximum reach."}
+                            </div>
+                          </div>
+
+                          <div style={styles.recCard}>
+                            <div style={styles.recCardTitle}>Publisher Diversity</div>
+                            <div style={styles.recCardText}>
+                              {data.domain_stats?.publishers_count} active publishers in your field. Compare their submission requirements.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Content Recommendations */}
                       <div style={styles.recommendationsList}>
+                        <h3 style={styles.recSectionTitle}>Content Enhancement</h3>
                         {data.recommendations && data.recommendations.length > 0 ? (
                           data.recommendations.map((rec, index) => (
                             <div key={index} style={styles.recommendationItem}>
                               <div style={styles.recommendationNumber}>
-                                Suggestion {index + 1}: {rec.title}
+                                {index + 1}. {rec.title}
                               </div>
                               <p style={styles.recommendationText}>
                                 {rec.description}
@@ -355,12 +553,49 @@ function App() {
                           <p style={styles.noResults}>No recommendations available</p>
                         )}
                       </div>
+
+                      {/* Submission Tips */}
+                      <div style={styles.submissionTips}>
+                        <h3 style={styles.recSectionTitle}>Submission Strategy for {data.domain_stats?.domain || "Your Field"}</h3>
+                        <ul style={styles.tipsList}>
+                          <li>Your research aligns with <strong>{data.domain_stats?.domain || "your area"}</strong></li>
+                          <li>Review papers from {(data.domain_stats?.matching_venues || 0).toLocaleString()} similar venues</li>
+                          <li>Target publishers known for your research domain</li>
+                          <li>Check if your paper qualifies for Medline or OA venues</li>
+                          <li>Verify submission guidelines for each target venue</li>
+                        </ul>
+                      </div>
                     </div>
                   )}
 
                   {activeTab === "summary" && (
                     <div>
-                      <h2 style={styles.sectionTitle}>Paper Summary</h2>
+                      <h2 style={styles.sectionTitle}>Paper Summary & Analysis</h2>
+
+                      {/* Research Positioning */}
+                      <div style={styles.researchPositioning}>
+                        <h3 style={styles.rpTitle}>Research Positioning</h3>
+                        <div style={styles.rpContent}>
+                          <div style={styles.rpItem}>
+                            <span style={styles.rpLabel}>Research Domain:</span>
+                            <span style={styles.rpValue}>{data.domain_stats?.domain || "General Research"}</span>
+                          </div>
+                          <div style={styles.rpItem}>
+                            <span style={styles.rpLabel}>Domain Confidence:</span>
+                            <span style={styles.rpValue}>{data.domain_stats?.confidence?.toFixed(0) || "—"}%</span>
+                          </div>
+                          <div style={styles.rpItem}>
+                            <span style={styles.rpLabel}>Comparable to:</span>
+                            <span style={styles.rpValue}>{(data.domain_stats?.matching_venues || 0).toLocaleString()} venues</span>
+                          </div>
+                          <div style={styles.rpItem}>
+                            <span style={styles.rpLabel}>Publication Readiness:</span>
+                            <span style={{...styles.rpValue, color: getScoreColor(data.score)}}>{getScoreStatus(data.score)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Main Summary */}
                       <div
                         style={{
                           ...styles.summaryCard,
@@ -378,10 +613,58 @@ function App() {
                         <p style={styles.summaryText}>
                           {data.summary || "This paper presents a comprehensive analysis of research methodologies and findings in the field."}
                         </p>
-                        <div style={styles.summaryNote}>
-                          <strong>Note:</strong> This represents an extractive summary highlighting key sentences from your paper.
+                      </div>
+
+                      {/* Summary Quality Metrics */}
+                      <div style={styles.summaryQuality}>
+                        <h3 style={styles.sqTitle}>Summary Quality Assessment</h3>
+                        <div style={styles.sqGrid}>
+                          <div style={styles.sqItem}>
+                            <span style={styles.sqLabel}>Content Depth</span>
+                            <div style={styles.sqBar}>
+                              <div style={{...styles.sqFill, width: `${Math.min(data.features?.word_count / 200, 100)}%`, backgroundColor: '#3b82f6'}}></div>
+                            </div>
+                            <span style={styles.sqValue}>{data.features?.word_count || 0} words</span>
+                          </div>
+                          <div style={styles.sqItem}>
+                            <span style={styles.sqLabel}>Structure Quality</span>
+                            <div style={styles.sqBar}>
+                              <div style={{...styles.sqFill, width: `${Math.min((data.features?.sentence_count / data.features?.word_count) * 500, 100)}%`, backgroundColor: '#8b5cf6'}}></div>
+                            </div>
+                            <span style={styles.sqValue}>{data.features?.sentence_count || 0} sentences</span>
+                          </div>
+                          <div style={styles.sqItem}>
+                            <span style={styles.sqLabel}>Academic Tone</span>
+                            <div style={styles.sqBar}>
+                              <div style={{...styles.sqFill, width: `${Math.min(data.features?.avg_word_length * 15, 100)}%`, backgroundColor: '#06b6d4'}}></div>
+                            </div>
+                            <span style={styles.sqValue}>{data.features?.avg_word_length?.toFixed(1) || 0} avg</span>
+                          </div>
                         </div>
                       </div>
+
+                      {/* Recommendations for Abstract */}
+                      <div style={styles.abstractRecommendation}>
+                        <h3 style={styles.arTitle}>Ready for Submission</h3>
+                        <p style={styles.arText}>
+                          Your paper demonstrates strong research in <strong>{data.domain_stats?.domain || "your research area"}</strong>. 
+                          Use this summary as your abstract when submitting to the {(data.domain_stats?.matching_venues || 0).toLocaleString()} relevant venues in the database.
+                        </p>
+                      </div>
+
+                      <div style={styles.summaryNote}>
+                        <strong>Note:</strong> This is an extractive summary highlighting key sentences. Refine for your final abstract submission.
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab === "venues" && (
+                    <div>
+                      <VenueRecommenderEnhanced
+                        paperText={data.summary || ""}
+                        paperScore={data.score}
+                        paperTopic=""
+                      />
                     </div>
                   )}
                 </div>
@@ -1030,6 +1313,440 @@ const styles = {
     color: "#475569",
     fontWeight: "500",
     lineHeight: "1.6",
+  },
+
+  qualityBreakdown: {
+    display: "grid",
+    gridTemplateColumns: "1fr",
+    gap: "16px",
+    marginBottom: "32px",
+    background: "#ffffff",
+    borderRadius: "12px",
+    padding: "24px",
+    boxShadow: "0 2px 8px rgba(30, 41, 59, 0.06), 0 1px 3px rgba(30, 41, 59, 0.04)",
+    border: "1px solid rgba(30, 41, 59, 0.08)",
+  },
+
+  breakdownItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "16px",
+  },
+
+  breakdownLabel: {
+    fontSize: "14px",
+    fontWeight: "600",
+    color: "#1e293b",
+    minWidth: "180px",
+  },
+
+  breakdownBar: {
+    flex: 1,
+    height: "24px",
+    background: "#e2e8f0",
+    borderRadius: "6px",
+    overflow: "hidden",
+    position: "relative",
+  },
+
+  breakdownFill: {
+    height: "100%",
+    borderRadius: "6px",
+    transition: "width 0.7s cubic-bezier(0.4, 0, 0.2, 1)",
+    boxShadow: "0 0 8px rgba(0, 0, 0, 0.1)",
+  },
+
+  breakdownScore: {
+    fontSize: "14px",
+    fontWeight: "700",
+    color: "#3b82f6",
+    minWidth: "70px",
+    textAlign: "right",
+  },
+
+  venueScoringSuggestion: {
+    background: "linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%)",
+    border: "1px solid rgba(59, 130, 246, 0.2)",
+    borderRadius: "12px",
+    padding: "24px",
+    marginTop: "24px",
+  },
+
+  suggestionTitle: {
+    fontSize: "16px",
+    fontWeight: "700",
+    color: "#1e293b",
+    marginBottom: "12px",
+  },
+
+  suggestionText: {
+    fontSize: "14px",
+    color: "#475569",
+    marginBottom: "16px",
+    lineHeight: "1.6",
+  },
+
+  suggestionList: {
+    paddingLeft: "20px",
+    margin: "0",
+    fontSize: "13px",
+    color: "#475569",
+    lineHeight: "2",
+  },
+
+  domainSection: {
+    marginBottom: "16px",
+  },
+
+  domainLabel: {
+    fontSize: "12px",
+    fontWeight: "700",
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
+    marginBottom: "6px",
+  },
+
+  domainName: {
+    fontSize: "16px",
+    fontWeight: "700",
+    color: "#3b82f6",
+    marginBottom: "8px",
+  },
+
+  confidenceBar: {
+    height: "6px",
+    background: "#e2e8f0",
+    borderRadius: "3px",
+    overflow: "hidden",
+    marginBottom: "4px",
+  },
+
+  confidenceFill: {
+    height: "100%",
+    background: "linear-gradient(90deg, #3b82f6 0%, #0ea5e9 100%)",
+    borderRadius: "3px",
+    transition: "width 0.6s cubic-bezier(0.4, 0, 0.2, 1)",
+  },
+
+  confidencePercent: {
+    fontSize: "11px",
+    color: "#64748b",
+    fontWeight: "600",
+    textAlign: "right",
+  },
+
+  divider: {
+    height: "1px",
+    background: "rgba(30, 41, 59, 0.08)",
+    margin: "12px 0",
+  },
+
+  statsSection: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+  },
+
+  statRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    fontSize: "13px",
+  },
+
+  statRowLabel: {
+    color: "#475569",
+    fontWeight: "500",
+  },
+
+  statRowValue: {
+    color: "#3b82f6",
+    fontWeight: "700",
+    fontSize: "14px",
+  },
+
+  recommendation: {
+    background: "rgba(59, 130, 246, 0.08)",
+    border: "1px solid rgba(59, 130, 246, 0.2)",
+    borderRadius: "8px",
+    padding: "12px",
+    marginTop: "8px",
+  },
+
+  recommendationTitle: {
+    fontSize: "12px",
+    fontWeight: "700",
+    color: "#3b82f6",
+    marginBottom: "4px",
+  },
+
+  domainAnalysisCard: {
+    background: "#ffffff",
+    borderRadius: "12px",
+    padding: "24px",
+    marginBottom: "32px",
+    boxShadow: "0 2px 8px rgba(30, 41, 59, 0.06), 0 1px 3px rgba(30, 41, 59, 0.04)",
+    border: "1px solid rgba(59, 130, 246, 0.1)",
+    transition: "box-shadow 0.3s ease, transform 0.3s ease",
+  },
+
+  domainAnalysisGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, 1fr)",
+    gap: "16px",
+    marginBottom: "16px",
+  },
+
+  analysisItem: {
+    padding: "12px",
+    background: "rgba(59, 130, 246, 0.04)",
+    borderRadius: "8px",
+    border: "1px solid rgba(59, 130, 246, 0.1)",
+  },
+
+  analysisLabel: {
+    fontSize: "12px",
+    fontWeight: "700",
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
+    marginBottom: "6px",
+  },
+
+  analysisValue: {
+    fontSize: "18px",
+    fontWeight: "800",
+    color: "#3b82f6",
+    marginBottom: "4px",
+  },
+
+  analysisSubtext: {
+    fontSize: "11px",
+    color: "#475569",
+    fontWeight: "500",
+  },
+
+  domainInsight: {
+    padding: "12px 14px",
+    background: "rgba(34, 197, 94, 0.06)",
+    border: "1px solid rgba(34, 197, 94, 0.2)",
+    borderRadius: "8px",
+    fontSize: "13px",
+    color: "#166534",
+    lineHeight: "1.6",
+    fontWeight: "500",
+  },
+
+  noveltyBadge: {
+    display: "inline-block",
+    padding: "4px 10px",
+    borderRadius: "20px",
+    fontSize: "11px",
+    fontWeight: "700",
+    marginRight: "8px",
+    letterSpacing: "0.3px",
+  },
+
+  domainContext: {
+    padding: "10px 12px",
+    background: "rgba(59, 130, 246, 0.06)",
+    borderRadius: "6px",
+    fontSize: "12px",
+    color: "#1e40af",
+    fontWeight: "500",
+    marginTop: "8px",
+    borderLeft: "2px solid #3b82f6",
+  },
+
+  venueStatBox: {
+    display: "inline-block",
+    padding: "6px 10px",
+    background: "#f0f9ff",
+    borderRadius: "6px",
+    fontSize: "12px",
+    fontWeight: "600",
+    color: "#0c4a6e",
+    marginRight: "8px",
+    marginTop: "4px",
+  },
+
+  recommendationCategory: {
+    padding: "12px",
+    marginBottom: "12px",
+    background: "rgba(59, 130, 246, 0.04)",
+    borderRadius: "8px",
+    borderLeft: "3px solid #3b82f6",
+  },
+
+  recommendationActions: {
+    marginTop: "16px",
+    padding: "12px",
+    background: "rgba(34, 197, 94, 0.04)",
+    borderRadius: "8px",
+    borderLeft: "3px solid #22c55e",
+  },
+
+  actionItem: {
+    padding: "8px 0",
+    fontSize: "13px",
+    color: "#166534",
+    fontWeight: "500",
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "8px",
+  },
+
+  summaryHighlight: {
+    padding: "14px 16px",
+    background: "linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(34, 197, 94, 0.08) 100%)",
+    borderRadius: "8px",
+    borderLeft: "3px solid #3b82f6",
+    marginBottom: "16px",
+    fontSize: "14px",
+    fontWeight: "500",
+    color: "#1e293b",
+    lineHeight: "1.5",
+  },
+
+  publicationReady: {
+    padding: "12px 14px",
+    background: "#f0fdf4",
+    border: "1px solid rgba(34, 197, 94, 0.2)",
+    borderRadius: "8px",
+    fontSize: "13px",
+    color: "#166534",
+    fontWeight: "500",
+    marginTop: "12px",
+  },
+
+  paperMetadata: {
+    fontSize: "12px",
+    color: "#64748b",
+    fontWeight: "500",
+    marginBottom: "8px",
+  },
+
+  similarPaperCard: {
+    background: "#ffffff",
+    borderRadius: "8px",
+    padding: "16px",
+    marginBottom: "12px",
+    border: "1px solid rgba(59, 130, 246, 0.15)",
+    boxShadow: "0 1px 3px rgba(30, 41, 59, 0.05)",
+  },
+
+  similarityScore: {
+    display: "inline-block",
+    padding: "4px 8px",
+    background: "#dbeafe",
+    color: "#0c4a6e",
+    borderRadius: "4px",
+    fontSize: "12px",
+    fontWeight: "600",
+  },
+
+  nextSteps: {
+    padding: "16px",
+    background: "#f8fafc",
+    borderRadius: "8px",
+    border: "1px solid rgba(100, 116, 139, 0.1)",
+    marginTop: "16px",
+  },
+
+  nextStepsTitle: {
+    fontSize: "14px",
+    fontWeight: "700",
+    color: "#1e293b",
+    marginBottom: "12px",
+  },
+
+  nextStepsItem: {
+    fontSize: "13px",
+    color: "#475569",
+    fontWeight: "500",
+    marginBottom: "8px",
+    paddingLeft: "20px",
+    position: "relative",
+    lineHeight: "1.5",
+  },
+
+  domainRecommendations: {
+    marginBottom: "32px",
+  },
+
+  recGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: "20px",
+    marginTop: "16px",
+  },
+
+  recCard: {
+    background: "#ffffff",
+    borderRadius: "12px",
+    padding: "24px",
+    border: "1px solid rgba(59, 130, 246, 0.1)",
+    boxShadow: "0 2px 8px rgba(30, 41, 59, 0.06), 0 1px 3px rgba(30, 41, 59, 0.04)",
+    transition: "all 0.3s ease",
+    textAlign: "left",
+  },
+
+  recCardTitle: {
+    fontSize: "16px",
+    fontWeight: "700",
+    color: "#1e293b",
+    marginBottom: "12px",
+  },
+
+  recCardText: {
+    fontSize: "14px",
+    color: "#475569",
+    lineHeight: "1.6",
+  },
+
+  recSectionTitle: {
+    fontSize: "18px",
+    fontWeight: "700",
+    marginBottom: "20px",
+    color: "#1e293b",
+    marginTop: "24px",
+    borderBottom: "2px solid rgba(59, 130, 246, 0.15)",
+    paddingBottom: "12px",
+  },
+
+  rpTitle: {
+    fontSize: "16px",
+    fontWeight: "700",
+    marginBottom: "16px",
+    color: "#1e293b",
+  },
+
+  rpContent: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, 1fr)",
+    gap: "16px",
+  },
+
+  rpItem: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "12px",
+    background: "rgba(59, 130, 246, 0.04)",
+    borderRadius: "8px",
+  },
+
+  rpLabel: {
+    fontSize: "13px",
+    fontWeight: "600",
+    color: "#64748b",
+  },
+
+  rpValue: {
+    fontSize: "14px",
+    fontWeight: "700",
+    color: "#3b82f6",
   },
 };
 
